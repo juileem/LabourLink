@@ -174,6 +174,7 @@ app.get("/contractor/jobs/:id/applications", (request, response) => {
       `
         SELECT
           job_applications.job_id,
+          job_applications.worker_id,
           users.name AS worker_name,
           users.skill AS skill,
           users.rating AS rating,
@@ -354,6 +355,111 @@ app.post("/jobs/:id/select", (request, response) => {
   return response.json({ application });
 });
 
+app.put("/jobs/:id/complete", (request, response) => {
+  const jobId = Number(request.params.id);
+  const { contractorId } = request.body as { contractorId: number };
+
+  if (!contractorId) {
+    return response.status(400).json({ message: "Contractor ID required" });
+  }
+
+  const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId) as any;
+  if (!job) {
+    return response.status(404).json({ message: "Job not found" });
+  }
+
+  if (job.contractor_id !== contractorId) {
+    return response.status(403).json({ message: "Only the creator contractor can complete this job" });
+  }
+
+  db.prepare("UPDATE jobs SET status = 'completed' WHERE id = ?").run(jobId);
+
+  return response.json({ message: "Job marked as completed" });
+});
+
+app.post("/ratings/contractor", (request, response) => {
+  const { jobId, workerId, contractorId, rating, review } = request.body as {
+    jobId: number;
+    workerId: number;
+    contractorId: number;
+    rating: number;
+    review: string;
+  };
+
+  if (!jobId || !workerId || !contractorId || !rating || !review) {
+    return response.status(400).json({ message: "Missing required rating fields" });
+  }
+
+  const existing = db.prepare("SELECT * FROM job_ratings WHERE job_id = ? AND worker_id = ? AND rated_by = 'worker'").get(jobId, workerId);
+  if (existing) {
+    return response.status(400).json({ message: "You have already rated this contractor for this job." });
+  }
+
+  db.prepare(`
+    INSERT INTO job_ratings (job_id, worker_id, contractor_id, rated_by, rating, review)
+    VALUES (?, ?, ?, 'worker', ?, ?)
+  `).run(jobId, workerId, contractorId, rating, review);
+
+  const avg = db.prepare("SELECT AVG(rating) as avg FROM job_ratings WHERE contractor_id = ? AND rated_by = 'worker'").get(contractorId) as { avg: number };
+  if (avg && avg.avg) {
+    db.prepare("UPDATE users SET rating = ? WHERE id = ?").run(avg.avg, contractorId);
+  }
+
+  return response.json({ message: "Rating submitted successfully" });
+});
+
+app.post("/ratings/worker", (request, response) => {
+  const { jobId, workerId, contractorId, rating, review } = request.body as {
+    jobId: number;
+    workerId: number;
+    contractorId: number;
+    rating: number;
+    review: string;
+  };
+
+  if (!jobId || !workerId || !contractorId || !rating || !review) {
+    return response.status(400).json({ message: "Missing required rating fields" });
+  }
+
+  const existing = db.prepare("SELECT * FROM job_ratings WHERE job_id = ? AND worker_id = ? AND rated_by = 'contractor'").get(jobId, workerId);
+  if (existing) {
+    return response.status(400).json({ message: "You have already rated this worker for this job." });
+  }
+
+  db.prepare(`
+    INSERT INTO job_ratings (job_id, worker_id, contractor_id, rated_by, rating, review)
+    VALUES (?, ?, ?, 'contractor', ?, ?)
+  `).run(jobId, workerId, contractorId, rating, review);
+
+  const avg = db.prepare("SELECT AVG(rating) as avg FROM job_ratings WHERE worker_id = ? AND rated_by = 'contractor'").get(workerId) as { avg: number };
+  if (avg && avg.avg) {
+    db.prepare("UPDATE users SET rating = ? WHERE id = ?").run(avg.avg, workerId);
+  }
+
+  return response.json({ message: "Rating submitted successfully" });
+});
+
+app.get("/workers/:id/history", (request, response) => {
+  const workerId = Number(request.params.id);
+
+  const history = db.prepare(`
+    SELECT
+      jobs.id AS job_id,
+      jobs.skill AS skill,
+      users.name AS contractor_name,
+      jobs.date AS date,
+      job_ratings.rating AS rating,
+      job_ratings.review AS review
+    FROM jobs
+    JOIN job_applications ON job_applications.job_id = jobs.id
+    JOIN users ON users.id = jobs.contractor_id
+    LEFT JOIN job_ratings ON job_ratings.job_id = jobs.id AND job_ratings.worker_id = ? AND job_ratings.rated_by = 'contractor'
+    WHERE job_applications.worker_id = ? AND jobs.status = 'completed' AND job_applications.status = 'accepted'
+    ORDER BY jobs.date DESC
+  `).all(workerId, workerId);
+
+  return response.json({ history });
+});
 const port = 4000;
 app.listen(port, () => {
   console.log(`LabourLink API listening on http://localhost:${port}`);

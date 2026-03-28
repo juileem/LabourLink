@@ -38,6 +38,14 @@ export const api = {
   getContractorApplications: <T>(contractorId: number) => 
     request<T>(`/contractor/jobs/${contractorId}/applications`),
   selectWorker: <T>(jobId: number, payload: unknown) =>
-    request<T>(`/jobs/${jobId}/select`, { method: "POST", body: JSON.stringify(payload) })
+    request<T>(`/jobs/${jobId}/select`, { method: "POST", body: JSON.stringify(payload) }),
+  completeJob: <T>(jobId: number, payload: unknown) =>
+    request<T>(`/jobs/${jobId}/complete`, { method: "PUT", body: JSON.stringify(payload) }),
+  rateContractor: <T>(payload: unknown) =>
+    request<T>("/ratings/contractor", { method: "POST", body: JSON.stringify(payload) }),
+  rateWorker: <T>(payload: unknown) =>
+    request<T>("/ratings/worker", { method: "POST", body: JSON.stringify(payload) }),
+  getWorkerHistory: <T>(workerId: number) =>
+    request<T>(`/workers/${workerId}/history`)
 };
 

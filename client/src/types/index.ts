@@ -25,7 +25,8 @@ export interface Job {
   description: string | null;
   applicant_count?: number;
   selected_count?: number;
-  status?: "Open" | "Closed";
+  status?: "open" | "closed" | "completed";
+  application_status?: string;
 }
 
 export interface Application {
@@ -36,4 +37,13 @@ export interface Application {
   worker_name?: string;
   worker_skill?: string | null;
   worker_location?: string;
+}
+
+export interface JobHistory {
+  job_id: number;
+  skill: string;
+  contractor_name: string;
+  date: string;
+  rating: number;
+  review: string;
 }

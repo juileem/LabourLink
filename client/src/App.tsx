@@ -10,6 +10,7 @@ import { CreateJobForm } from "./components/CreateJobForm";
 import { JobCard } from "./components/JobCard";
 import { Navbar } from "./components/Navbar";
 import { ProfileCard } from "./components/ProfileCard";
+import { RatingModal } from "./components/RatingModal";
 
 function App() {
   const [user, setUser] = useState<User | null>(() => loadSession());
@@ -20,6 +21,14 @@ function App() {
   const [error, setError] = useState("");
   const [acceptedWorkerJobs, setAcceptedWorkerJobs] = useState<Job[]>([]);
   const [contractorAcceptedWorkers, setContractorAcceptedWorkers] = useState<Record<number, any[]>>({});
+  const [workerHistory, setWorkerHistory] = useState<import("./types").JobHistory[]>([]);
+  const [ratingModal, setRatingModal] = useState<{
+    isOpen: boolean;
+    jobId: number;
+    targetId: number;
+    title: string;
+    type: "worker" | "contractor";
+  }>({ isOpen: false, jobId: 0, targetId: 0, title: "", type: "worker" });
 
   const refreshJobs = async () => {
     setRefreshing(true);
@@ -29,6 +38,8 @@ function App() {
         setJobs(availableResponse.jobs);
         const acceptedResponse = await api.getWorkerAcceptedJobs<{ jobs: Job[] }>(user.id);
         setAcceptedWorkerJobs(acceptedResponse.jobs);
+        const historyResponse = await api.getWorkerHistory<{ history: import("./types").JobHistory[] }>(user.id);
+        setWorkerHistory(historyResponse.history);
       } else {
         const response = await api.getJobs<{ jobs: Job[] }>();
         setJobs(response.jobs);
@@ -137,6 +148,41 @@ function App() {
     }
   };
 
+  const handleCompleteJob = async (jobId: number) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      await api.completeJob(jobId, { contractorId: user.id });
+      await refreshJobs();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not complete job");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitRating = async (payload: { rating: number; review: string }) => {
+    if (!user) return;
+    if (ratingModal.type === "worker") {
+      await api.rateWorker({
+        jobId: ratingModal.jobId,
+        workerId: ratingModal.targetId,
+        contractorId: user.id,
+        rating: payload.rating,
+        review: payload.review
+      });
+    } else {
+      await api.rateContractor({
+        jobId: ratingModal.jobId,
+        workerId: user.id,
+        contractorId: ratingModal.targetId,
+        rating: payload.rating,
+        review: payload.review
+      });
+    }
+    await refreshJobs();
+  };
+
   if (!user) {
     return (
       <main className="min-h-screen bg-hero-grid bg-[size:24px_24px] px-4 py-8 sm:px-6 lg:px-8">
@@ -241,10 +287,10 @@ function App() {
                       key={job.id}
                       job={{
                         ...job,
-                        status: selectedApplicants.length >= job.workers_needed ? "Closed" : "Open"
+                        status: selectedApplicants.length >= job.workers_needed ? "closed" : "open"
                       }}
-                      actionLabel={user.role === "worker" ? (alreadyApplied ? "Applied" : "Accept Job") : undefined}
-                      onAction={user.role === "worker" ? () => void handleApply(job.id) : undefined}
+                      actionLabel={user.role === "worker" ? (alreadyApplied ? "Applied" : "Accept Job") : (job.status === "open" ? "Mark as Completed" : undefined)}
+                      onAction={user.role === "worker" ? () => void handleApply(job.id) : (job.status === "open" ? () => void handleCompleteJob(job.id) : undefined)}
                       disabled={loading || alreadyApplied}
                       footer={
                         user.role === "contractor" ? (
@@ -294,7 +340,24 @@ function App() {
                                           ★ {worker.rating.toFixed(1)}
                                         </span>
                                       </div>
-                                      <span className="text-stone-400">{worker.skill}</span>
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-stone-400">{worker.skill}</span>
+                                        {job.status === "completed" && (
+                                          <Button 
+                                            variant="secondary" 
+                                            className="px-2 py-1 text-xs"
+                                            onClick={() => setRatingModal({
+                                              isOpen: true,
+                                              jobId: job.id,
+                                              targetId: worker.worker_id,
+                                              title: `Rate ${worker.worker_name}`,
+                                              type: "worker"
+                                            })}
+                                          >
+                                            Rate Worker
+                                          </Button>
+                                        )}
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -340,22 +403,76 @@ function App() {
             </section>
 
             {user.role === "worker" ? (
-              <section className="space-y-4">
-                <h2 className="text-2xl font-bold text-white">Accepted Jobs</h2>
-                <div className="space-y-4">
-                  {acceptedWorkerJobs.length ? (
-                    acceptedWorkerJobs.map((job) => <JobCard key={`accepted-${job.id}`} job={job} />)
-                  ) : (
-                    <Card>
-                      <p className="text-stone-400">Accepted jobs will appear here after you apply.</p>
-                    </Card>
-                  )}
-                </div>
-              </section>
+              <>
+                <section className="space-y-4">
+                  <h2 className="text-2xl font-bold text-white">Accepted Jobs</h2>
+                  <div className="space-y-4">
+                    {acceptedWorkerJobs.length ? (
+                      acceptedWorkerJobs.map((job) => (
+                        <JobCard 
+                          key={`accepted-${job.id}`} 
+                          job={job} 
+                          actionLabel={job.status === "completed" ? "Rate Contractor" : undefined}
+                          onAction={job.status === "completed" ? () => setRatingModal({
+                            isOpen: true,
+                            jobId: job.id,
+                            targetId: job.contractor_id,
+                            title: `Rate ${job.contractor_name}`,
+                            type: "contractor"
+                          }) : undefined}
+                        />
+                      ))
+                    ) : (
+                      <Card>
+                        <p className="text-stone-400">Accepted jobs will appear here after you apply.</p>
+                      </Card>
+                    )}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <h2 className="text-2xl font-bold text-white">Completed Jobs</h2>
+                  <div className="space-y-4">
+                    {workerHistory.length ? (
+                      workerHistory.map((historyItem) => (
+                        <Card key={`history-${historyItem.job_id}`}>
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="font-bold text-lg text-white">{historyItem.skill} Job</h3>
+                              <p className="text-sm text-stone-400 mt-1">Contractor: {historyItem.contractor_name}</p>
+                              <p className="text-sm text-stone-400">Completed: {historyItem.date}</p>
+                            </div>
+                            {historyItem.rating ? (
+                              <div className="text-right">
+                                <span className="inline-flex rounded-full bg-yellow-500/15 text-yellow-500 px-3 py-1 font-bold">
+                                  ★ {historyItem.rating}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+                          {historyItem.review ? (
+                            <div className="mt-4 p-3 rounded-xl bg-white/5 border border-white/10 text-stone-300 italic text-sm">
+                              "{historyItem.review}"
+                            </div>
+                          ) : null}
+                        </Card>
+                      ))
+                    ) : (
+                      <Card><p className="text-stone-400">No completed jobs yet.</p></Card>
+                    )}
+                  </div>
+                </section>
+              </>
             ) : null}
           </div>
         </div>
       </main>
+      <RatingModal
+        isOpen={ratingModal.isOpen}
+        title={ratingModal.title}
+        onSubmit={handleSubmitRating}
+        onClose={() => setRatingModal({ ...ratingModal, isOpen: false })}
+      />
     </div>
   );
 }

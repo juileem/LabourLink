@@ -58,6 +58,20 @@ export function initializeDatabase() {
       FOREIGN KEY(job_id) REFERENCES jobs(id),
       FOREIGN KEY(worker_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS job_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      worker_id INTEGER NOT NULL,
+      contractor_id INTEGER NOT NULL,
+      rated_by TEXT NOT NULL CHECK(rated_by IN ('worker', 'contractor')),
+      rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+      review TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(job_id) REFERENCES jobs(id),
+      FOREIGN KEY(worker_id) REFERENCES users(id),
+      FOREIGN KEY(contractor_id) REFERENCES users(id)
+    );
   `);
 
   try {
