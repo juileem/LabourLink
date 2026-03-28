@@ -48,13 +48,13 @@ export function CreateJobForm({ onCreate, contractorId, loading }: CreateJobForm
         />
         <Input
           label="Date"
-          type="date"
+          placeholder="e.g. 2026-10-15 or Tomorrow"
           value={form.date}
           onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
         />
         <Input
           label="Time"
-          type="time"
+          placeholder="e.g. 10:00 AM"
           value={form.time}
           onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
         />

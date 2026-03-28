@@ -224,8 +224,18 @@ app.post("/jobs", (request, response) => {
     description?: string;
   };
 
-  if (!contractor_id || !skill || !location || !date || !time || !salary || !workers_needed) {
-    return response.status(400).json({ message: "Missing required job fields" });
+  const missingFields = [];
+  if (!contractor_id) missingFields.push("contractor_id");
+  if (!skill) missingFields.push("skill");
+  if (!location) missingFields.push("location");
+  if (!date) missingFields.push("date");
+  if (!time) missingFields.push("time");
+  if (!salary) missingFields.push("salary");
+  if (!workers_needed) missingFields.push("workers_needed");
+
+  if (missingFields.length > 0) {
+    console.log("Failed to create job due to missing fields:", missingFields, "Body:", request.body);
+    return response.status(400).json({ message: `Missing required job fields: ${missingFields.join(", ")}` });
   }
 
   const contractor = db
