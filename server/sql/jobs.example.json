@@ -1,0 +1,10 @@
+{
+  "contractor_id": 12,
+  "skill_required": "Electrician",
+  "location": "Ikeja, Lagos",
+  "date": "2025-03-30",
+  "salary": 15000,
+  "workers_needed": 3,
+  "description": "Need electricians for a 2-day wiring and fittings job.",
+  "status": "open"
+}

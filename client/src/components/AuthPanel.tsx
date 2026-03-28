@@ -8,6 +8,8 @@ import { DaySelector } from "./DaySelector";
 import { Input } from "./Input";
 import { Select } from "./Select";
 
+import { api } from "../lib/api";
+
 interface AuthPanelProps {
   onSignup: (payload: Record<string, unknown>) => Promise<User>;
   onLogin: (payload: Record<string, unknown>) => Promise<User>;
@@ -20,7 +22,8 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
   const [selectedDays, setSelectedDays] = useState<string[]>(["Mon", "Tue", "Wed"]);
   const [error, setError] = useState("");
   const [loginPhone, setLoginPhone] = useState("");
-  const [loginOtp, setLoginOtp] = useState(mockOtp);
+  const [loginOtp, setLoginOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
   const [signupForm, setSignupForm] = useState({
     name: "",
     phone: "",
@@ -59,6 +62,23 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
       await onLogin({ phone: loginPhone, otp: loginOtp });
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : "Login failed");
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!loginPhone) {
+      setError("Please enter a phone number first");
+      return;
+    }
+    setError("");
+    try {
+      const result = await api.sendOtp<{ otp: string }>({ phone: loginPhone });
+      setOtpSent(true);
+      // For demo purposes, we will auto-fill the OTP so the user doesn't have to check console
+      // Alternatively we can just alert them, but auto-fill is easiest for demo
+      setLoginOtp(result.otp);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send OTP");
     }
   };
 
@@ -196,17 +216,28 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
                 label="Phone Number"
                 placeholder="Enter registered phone"
                 value={loginPhone}
-                onChange={(event) => setLoginPhone(event.target.value)}
+                onChange={(event) => {
+                  setLoginPhone(event.target.value);
+                  setOtpSent(false); // Reset OTP state if phone changes
+                }}
               />
-              <Input
-                label="Mock OTP"
-                placeholder="1234"
-                value={loginOtp}
-                onChange={(event) => setLoginOtp(event.target.value)}
-              />
-              <Button block disabled={loading} onClick={submitLogin}>
-                {loading ? "Logging in..." : "Login"}
-              </Button>
+              {!otpSent ? (
+                <Button block disabled={loading || !loginPhone} onClick={() => void handleSendOtp()}>
+                  {loading ? "Sending..." : "Send OTP"}
+                </Button>
+              ) : (
+                <>
+                  <Input
+                    label="Mock OTP"
+                    placeholder="Enter the OTP (or 1234)"
+                    value={loginOtp}
+                    onChange={(event) => setLoginOtp(event.target.value)}
+                  />
+                  <Button block disabled={loading} onClick={submitLogin}>
+                    {loading ? "Logging in..." : "Login"}
+                  </Button>
+                </>
+              )}
             </>
           )}
 

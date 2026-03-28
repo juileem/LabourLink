@@ -18,12 +18,21 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [acceptedWorkerJobs, setAcceptedWorkerJobs] = useState<Job[]>([]);
+  const [contractorAcceptedWorkers, setContractorAcceptedWorkers] = useState<Record<number, any[]>>({});
 
   const refreshJobs = async () => {
     setRefreshing(true);
     try {
-      const response = await api.getJobs<{ jobs: Job[] }>();
-      setJobs(response.jobs);
+      if (user?.role === "worker") {
+        const availableResponse = await api.getAvailableJobs<{ jobs: Job[] }>(user.skill || "", user.id);
+        setJobs(availableResponse.jobs);
+        const acceptedResponse = await api.getWorkerAcceptedJobs<{ jobs: Job[] }>(user.id);
+        setAcceptedWorkerJobs(acceptedResponse.jobs);
+      } else {
+        const response = await api.getJobs<{ jobs: Job[] }>();
+        setJobs(response.jobs);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to load jobs");
     } finally {
@@ -32,8 +41,12 @@ function App() {
   };
 
   useEffect(() => {
-    void refreshJobs();
-  }, []);
+    if (user) void refreshJobs();
+    else {
+      // Fetch all to show to unauthenticated users if needed, though they don't see the dashboard
+      void api.getJobs<{ jobs: Job[] }>().then(r => setJobs(r.jobs)).catch(() => {});
+    }
+  }, [user?.id]);
 
   const authenticated = async (runner: () => Promise<User>) => {
     setLoading(true);
@@ -49,29 +62,39 @@ function App() {
     }
   };
 
-  const acceptedJobs = useMemo(() => {
-    if (!user || user.role !== "worker") return [];
-    return jobs.filter((job) => (jobApplicants[job.id] ?? []).some((application) => application.worker_id === user.id));
-  }, [jobApplicants, jobs, user]);
+  // We now fetch accepted jobs separately, so we don't need this useMemo
+  // const acceptedJobs = useMemo(() => ...);
 
   useEffect(() => {
     const fetchApplicants = async () => {
       if (!user) return;
-      const visibleJobs =
-        user.role === "contractor" ? jobs.filter((job) => job.contractor_id === user.id) : jobs;
 
-      const entries = await Promise.all(
-        visibleJobs.map(async (job) => {
-          try {
-            const response = await api.getApplicants<{ applicants: Application[] }>(job.id);
-            return [job.id, response.applicants] as const;
-          } catch {
-            return [job.id, []] as const;
+      if (user.role === "contractor") {
+        try {
+          const acceptedResponse = await api.getContractorApplications<{ applications: any[] }>(user.id);
+          const grouped: Record<number, any[]> = {};
+          for (const app of acceptedResponse.applications) {
+            if (!grouped[app.job_id]) grouped[app.job_id] = [];
+            grouped[app.job_id].push(app);
           }
-        })
-      );
+          setContractorAcceptedWorkers(grouped);
+        } catch {}
 
-      setJobApplicants(Object.fromEntries(entries));
+        const entries = await Promise.all(
+          jobs.filter((job) => job.contractor_id === user.id).map(async (job) => {
+            try {
+              const response = await api.getApplicants<{ applicants: Application[] }>(job.id);
+              return [job.id, response.applicants] as const;
+            } catch {
+              return [job.id, []] as const;
+            }
+          })
+        );
+        setJobApplicants(Object.fromEntries(entries));
+      } else {
+        // Worker flow doesn't fetch applicants for all jobs anymore
+        setJobApplicants({});
+      }
     };
 
     void fetchApplicants();
@@ -81,10 +104,10 @@ function App() {
     if (!user) return;
     setLoading(true);
     try {
-      await api.applyToJob(jobId, { worker_id: user.id });
+      await api.acceptJob({ jobId, workerId: user.id });
       await refreshJobs();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not apply");
+      setError(requestError instanceof Error ? requestError.message : "Could not accept job");
     } finally {
       setLoading(false);
     }
@@ -242,7 +265,7 @@ function App() {
                             </div>
                             {selectedApplicants.length ? (
                               <div className="rounded-2xl bg-emerald-500/10 p-4 ring-1 ring-emerald-500/20">
-                                <p className="text-sm font-semibold text-emerald-300">Selected Workers</p>
+                                <p className="text-sm font-semibold text-emerald-300">Selected Workers (Legacy)</p>
                                 <div className="mt-3 space-y-2">
                                   {selectedApplicants.map((applicant) => (
                                     <div
@@ -251,6 +274,27 @@ function App() {
                                     >
                                       <span>{applicant.worker_name}</span>
                                       <span className="text-stone-400">{applicant.worker_skill}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                            {contractorAcceptedWorkers[job.id]?.length ? (
+                              <div className="rounded-2xl bg-brand-500/10 p-4 ring-1 ring-brand-500/20">
+                                <p className="text-sm font-semibold text-brand-300">Fast-Accepted Workers</p>
+                                <div className="mt-3 space-y-2">
+                                  {contractorAcceptedWorkers[job.id].map((worker, idx) => (
+                                    <div
+                                      key={`fast-accepted-${idx}`}
+                                      className="flex items-center justify-between text-sm text-stone-200"
+                                    >
+                                      <div>
+                                        <span>{worker.worker_name}</span>
+                                        <span className="ml-2 rounded bg-brand-500/20 px-1.5 py-0.5 text-xs text-brand-300">
+                                          ★ {worker.rating.toFixed(1)}
+                                        </span>
+                                      </div>
+                                      <span className="text-stone-400">{worker.skill}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -299,8 +343,8 @@ function App() {
               <section className="space-y-4">
                 <h2 className="text-2xl font-bold text-white">Accepted Jobs</h2>
                 <div className="space-y-4">
-                  {acceptedJobs.length ? (
-                    acceptedJobs.map((job) => <JobCard key={`accepted-${job.id}`} job={job} />)
+                  {acceptedWorkerJobs.length ? (
+                    acceptedWorkerJobs.map((job) => <JobCard key={`accepted-${job.id}`} job={job} />)
                   ) : (
                     <Card>
                       <p className="text-stone-400">Accepted jobs will appear here after you apply.</p>

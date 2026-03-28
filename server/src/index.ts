@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 const mockOtp = "1234";
-
+const otps = new Map<string, string>();
 app.get("/health", (_request, response) => {
   response.json({ ok: true });
 });
@@ -50,9 +50,12 @@ app.post("/auth/login", (request, response) => {
     return response.status(400).json({ message: "Phone and OTP are required" });
   }
 
-  if (otp !== mockOtp) {
-    return response.status(401).json({ message: "Invalid OTP. Use 1234 for demo." });
+  if (otp !== mockOtp && otp !== otps.get(phone)) {
+    return response.status(401).json({ message: "Invalid OTP. Use 1234 or request a new one for demo." });
   }
+
+  // Clear OTP after successful use
+  otps.delete(phone);
 
   const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(phone);
   if (!user) {
@@ -75,6 +78,136 @@ app.get("/jobs", (_request, response) => {
       `
     )
     .all();
+
+  return response.json({ jobs });
+});
+
+app.post("/auth/send-otp", (request, response) => {
+  const { phone } = request.body as { phone?: string };
+
+  if (!phone) {
+    return response.status(400).json({ message: "Phone is required" });
+  }
+
+  const existing = db.prepare("SELECT id FROM users WHERE phone = ?").get(phone);
+  if (!existing) {
+    return response.status(404).json({ message: "No account found for this phone number" });
+  }
+
+  const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+  otps.set(phone, generatedOtp);
+
+  // For testing/demo purposes, we return the OTP directly
+  return response.json({ otp: generatedOtp });
+});
+
+app.get("/jobs/available", (request, response) => {
+  const workerSkill = request.query.skill as string | undefined;
+  const workerId = request.query.workerId ? Number(request.query.workerId) : undefined;
+
+  let query = `
+    SELECT
+      jobs.*,
+      users.name AS contractor_name
+    FROM jobs
+    JOIN users ON users.id = jobs.contractor_id
+    WHERE jobs.status = 'open'
+  `;
+  const params: (string | number)[] = [];
+
+  if (workerSkill) {
+    query += ` AND jobs.skill = ?`;
+    params.push(workerSkill);
+  }
+
+  if (workerId) {
+    query += ` AND jobs.id NOT IN (SELECT job_id FROM job_applications WHERE worker_id = ?)`;
+    params.push(workerId);
+  }
+
+  query += ` ORDER BY date ASC, time ASC`;
+
+  const jobs = db.prepare(query).all(...params);
+
+  return response.json({ jobs });
+});
+
+app.post("/jobs/accept", (request, response) => {
+  const { jobId, workerId } = request.body as { jobId?: number; workerId?: number };
+
+  if (!jobId || !workerId) {
+    return response.status(400).json({ message: "jobId and workerId are required" });
+  }
+
+  const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId) as { id?: number } | undefined;
+  if (!job) {
+    return response.status(404).json({ message: "Job not found" });
+  }
+
+  const worker = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'worker'").get(workerId);
+  if (!worker) {
+    return response.status(404).json({ message: "Worker not found" });
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM job_applications WHERE job_id = ? AND worker_id = ?")
+    .get(jobId, workerId);
+
+  if (existing) {
+    return response.status(409).json({ message: "Worker already accepted this job" });
+  }
+
+  const result = db
+    .prepare("INSERT INTO job_applications (job_id, worker_id, status) VALUES (?, ?, 'accepted')")
+    .run(jobId, workerId);
+
+  const application = db.prepare("SELECT * FROM job_applications WHERE id = ?").get(result.lastInsertRowid);
+  return response.status(201).json({ application });
+});
+
+app.get("/contractor/jobs/:id/applications", (request, response) => {
+  // Wait, the API specifies contractor ID as parameter: "/contractor/jobs/:contractorId/applications"
+  const contractorId = Number(request.params.id);
+
+  const applications = db
+    .prepare(
+      `
+        SELECT
+          job_applications.job_id,
+          users.name AS worker_name,
+          users.skill AS skill,
+          users.rating AS rating,
+          job_applications.status AS status
+        FROM job_applications
+        JOIN users ON users.id = job_applications.worker_id
+        JOIN jobs ON jobs.id = job_applications.job_id
+        WHERE jobs.contractor_id = ? AND job_applications.status = 'accepted'
+        ORDER BY job_applications.accepted_at DESC
+      `
+    )
+    .all(contractorId);
+
+  return response.json({ applications });
+});
+
+app.get("/worker/jobs/:id/accepted", (request, response) => {
+  const workerId = Number(request.params.id);
+
+  const jobs = db
+    .prepare(
+      `
+        SELECT
+          jobs.*,
+          users.name AS contractor_name,
+          job_applications.status AS application_status
+        FROM jobs
+        JOIN job_applications ON job_applications.job_id = jobs.id
+        JOIN users ON users.id = jobs.contractor_id
+        WHERE job_applications.worker_id = ?
+        ORDER BY job_applications.accepted_at DESC
+      `
+    )
+    .all(workerId);
 
   return response.json({ jobs });
 });
@@ -180,7 +313,7 @@ app.post("/jobs/:id/select", (request, response) => {
   const job = db
     .prepare("SELECT workers_needed FROM jobs WHERE id = ?")
     .get(jobId) as { workers_needed?: number } | undefined;
-  if (!job) {
+  if (!job || job.workers_needed === undefined) {
     return response.status(404).json({ message: "Job not found" });
   }
 

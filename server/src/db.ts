@@ -47,7 +47,25 @@ export function initializeDatabase() {
       FOREIGN KEY(job_id) REFERENCES jobs(id),
       FOREIGN KEY(worker_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS job_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      worker_id INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('accepted', 'pending', 'rejected')) DEFAULT 'accepted',
+      accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(job_id, worker_id),
+      FOREIGN KEY(job_id) REFERENCES jobs(id),
+      FOREIGN KEY(worker_id) REFERENCES users(id)
+    );
   `);
+
+  try {
+    db.exec(`ALTER TABLE jobs ADD COLUMN status TEXT DEFAULT 'open'`);
+  } catch (error) {
+    // Ignore error if column already exists
+  }
+
 
   const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
   if (!userCount.count) {
