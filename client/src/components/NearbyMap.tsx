@@ -39,11 +39,15 @@ export type MarkerData = {
   skill_required?: string;
   salary?: number;
   contractor_name?: string;
+  date?: string;
+  workers_needed?: number;
+  description?: string;
 
   // worker fields
   name?: string;
   skill?: string;
   rating?: number;
+  phone?: string;
 };
 
 type MapProps = {
@@ -85,18 +89,23 @@ export function NearbyMap({ centerLat, centerLng, markers }: MapProps) {
               <div className="p-1">
                 {marker.type === "job" ? (
                   <>
-                    <p className="font-bold text-base mb-1 text-stone-900">Skill: {marker.skill_required}</p>
-                    <p className="text-sm text-stone-600 font-medium">Salary: ₹{marker.salary}/day</p>
-                    <p className="text-sm text-stone-600 font-medium">Contractor: {marker.contractor_name}</p>
+                    <p className="font-bold text-base mb-1 text-stone-900">{marker.skill_required || marker.skill}</p>
+                    <p className="text-sm text-stone-600 font-medium">₹{marker.salary}/day</p>
+                    <p className="text-sm text-stone-600 font-medium">{marker.date} • {marker.workers_needed} Workers Needed</p>
+                    {marker.description && (
+                      <p className="text-sm text-stone-500 italic mt-1 line-clamp-2">{marker.description}</p>
+                    )}
+                    <p className="text-sm text-stone-600 font-bold mt-2">Contractor: {marker.contractor_name}</p>
                     <button className="mt-3 w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors shadow">
-                      View Job
+                      View Job Details
                     </button>
                   </>
                 ) : (
                   <>
-                    <p className="font-bold text-base mb-1 text-stone-900">Name: {marker.name}</p>
+                    <p className="font-bold text-base mb-1 text-stone-900">{marker.name}</p>
                     <p className="text-sm text-stone-600 font-medium">Skill: {marker.skill}</p>
                     <p className="text-sm text-stone-600 font-medium">Rating: ⭐{marker.rating?.toFixed(1) || "New"}</p>
+                    <p className="text-sm text-stone-600 font-medium">Phone: {marker.phone}</p>
                     <button className="mt-3 w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-1.5 px-3 rounded-lg text-sm transition-colors shadow">
                       View Profile
                     </button>

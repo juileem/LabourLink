@@ -72,6 +72,14 @@ export function initializeDatabase() {
       FOREIGN KEY(worker_id) REFERENCES users(id),
       FOREIGN KEY(contractor_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS worker_skills (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_id INTEGER NOT NULL,
+      skill_name TEXT NOT NULL,
+      UNIQUE(worker_id, skill_name),
+      FOREIGN KEY(worker_id) REFERENCES users(id)
+    );
   `);
 
   try {
@@ -182,4 +190,15 @@ export function initializeDatabase() {
         (3, 'Electrician', 'HSR Layout, Bengaluru', 19.080, 72.870, '2025-03-30', '10:00', 1200, 1, 'Wiring support for a retail fit-out.')
     `).run();
   }
+
+  // Migrate legacy users.skill mappings over to the new relation safely:
+  db.exec(`
+    INSERT INTO worker_skills (worker_id, skill_name)
+    SELECT id, skill FROM users 
+    WHERE role = 'worker' AND skill IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM worker_skills 
+      WHERE worker_id = users.id AND skill_name = users.skill
+    );
+  `);
 }

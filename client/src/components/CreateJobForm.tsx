@@ -22,6 +22,57 @@ export function CreateJobForm({ onCreate, contractorId, loading }: CreateJobForm
     workers_needed: "1",
     description: ""
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const updateField = (field: string, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: "" }));
+    }
+  };
+
+  const formatAMPM = (time24: string) => {
+    if (!time24) return "";
+    const [hours, minutes] = time24.split(":");
+    const h = parseInt(hours, 10);
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    return `${h12.toString().padStart(2, "0")}:${minutes} ${ampm}`;
+  };
+
+  const handleCreate = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!form.skill) newErrors.skill = "Skill is required";
+    if (!form.location) newErrors.location = "Location is required";
+    if (!form.date) newErrors.date = "Please select a date";
+    if (!form.time) newErrors.time = "Please select a time";
+    if (!form.salary) newErrors.salary = "Salary cannot be empty";
+    if (!form.workers_needed) newErrors.workers_needed = "Number of workers required";
+
+    if (form.date) {
+      const selectedDate = new Date(form.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        newErrors.date = "Job date cannot be in the past";
+      }
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    onCreate({
+      ...form,
+      contractor_id: contractorId,
+      time: formatAMPM(form.time),
+      salary: Number(form.salary),
+      workers_needed: Number(form.workers_needed)
+    });
+  };
 
   return (
     <Card>
@@ -33,7 +84,8 @@ export function CreateJobForm({ onCreate, contractorId, loading }: CreateJobForm
         <Select
           label="Skill Required"
           value={form.skill}
-          onChange={(event) => setForm((current) => ({ ...current, skill: event.target.value }))}
+          error={errors.skill}
+          onChange={(event) => updateField("skill", event.target.value)}
         >
           {skills.map((skill) => (
             <option key={skill} value={skill}>
@@ -44,55 +96,51 @@ export function CreateJobForm({ onCreate, contractorId, loading }: CreateJobForm
         <Input
           label="Location"
           value={form.location}
-          onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
+          error={errors.location}
+          onChange={(event) => updateField("location", event.target.value)}
         />
         <Input
           label="Date"
-          placeholder="e.g. 2026-10-15 or Tomorrow"
+          type="date"
           value={form.date}
-          onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
+          error={errors.date}
+          min={new Date().toISOString().split("T")[0]}
+          onChange={(event) => updateField("date", event.target.value)}
         />
         <Input
           label="Time"
-          placeholder="e.g. 10:00 AM"
+          type="time"
           value={form.time}
-          onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
+          error={errors.time}
+          onChange={(event) => updateField("time", event.target.value)}
         />
         <Input
           label="Salary"
           type="number"
           value={form.salary}
-          onChange={(event) => setForm((current) => ({ ...current, salary: event.target.value }))}
+          error={errors.salary}
+          onChange={(event) => updateField("salary", event.target.value)}
         />
         <Input
           label="Workers Needed"
           type="number"
           value={form.workers_needed}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, workers_needed: event.target.value }))
-          }
+          error={errors.workers_needed}
+          onChange={(event) => updateField("workers_needed", event.target.value)}
         />
         <div className="md:col-span-2">
           <Input
             label="Description"
             value={form.description}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, description: event.target.value }))
-            }
+            error={errors.description}
+            onChange={(event) => updateField("description", event.target.value)}
           />
         </div>
       </div>
       <Button
         className="mt-5"
         disabled={loading}
-        onClick={() =>
-          onCreate({
-            ...form,
-            contractor_id: contractorId,
-            salary: Number(form.salary),
-            workers_needed: Number(form.workers_needed)
-          })
-        }
+        onClick={handleCreate}
       >
         {loading ? "Posting..." : "Create Job Post"}
       </Button>

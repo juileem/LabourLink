@@ -261,7 +261,7 @@ function App() {
 
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
           <div className="space-y-6">
-            <ProfileCard user={user} />
+            <ProfileCard user={user} refreshTrigger={refreshing} />
             <Card>
               <p className="text-xs uppercase tracking-[0.24em] text-brand-300">Rating</p>
               <h3 className="mt-2 text-2xl font-bold text-white">{user.rating.toFixed(1)} / 5</h3>

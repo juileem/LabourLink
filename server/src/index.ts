@@ -45,6 +45,9 @@ app.post("/auth/signup", (request, response) => {
   const location_lat = 19.0760;
   const location_lng = 72.8777;
 
+  const skillsArray = Array.isArray(skill) ? skill : (skill ? [skill] : []);
+  const primarySkill = skillsArray.length > 0 ? skillsArray[0] : null;
+
   const result = db
     .prepare(
       `
@@ -52,9 +55,22 @@ app.post("/auth/signup", (request, response) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .run(name, phone, role, location, location_lat, location_lng, skill ?? null, preferred_days ?? "", company_name ?? null, rating);
+    .run(name, phone, role, location, location_lat, location_lng, primarySkill, preferred_days ?? "", company_name ?? null, rating);
 
-  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
+  const newUserId = result.lastInsertRowid;
+
+  if (role === "worker" && skillsArray.length > 0) {
+    const insertSkill = db.prepare("INSERT INTO worker_skills (worker_id, skill_name) VALUES (?, ?)");
+    for (const s of skillsArray) {
+      try {
+        insertSkill.run(newUserId, s);
+      } catch (e) {
+        // ignoring duplicates
+      }
+    }
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(newUserId);
   return response.status(201).json({ user });
 });
 
@@ -130,14 +146,15 @@ app.get("/jobs/available", (request, response) => {
   `;
   const params: (string | number)[] = [];
 
-  if (workerSkill) {
-    query += ` AND jobs.skill = ?`;
-    params.push(workerSkill);
-  }
-
   if (workerId) {
+    query += ` AND jobs.skill IN (SELECT skill_name FROM worker_skills WHERE worker_id = ?)`;
+    params.push(workerId);
+    
     query += ` AND jobs.id NOT IN (SELECT job_id FROM job_applications WHERE worker_id = ?)`;
     params.push(workerId);
+  } else if (workerSkill) {
+    query += ` AND jobs.skill = ?`;
+    params.push(workerSkill);
   }
 
   query += ` ORDER BY date ASC, time ASC`;
@@ -155,11 +172,11 @@ app.get("/jobs/nearby/:workerId", (request, response) => {
   }
 
   const jobs = db.prepare(`
-    SELECT jobs.*, users.name AS contractor_name
+    SELECT jobs.*, jobs.skill AS skill_required, users.name AS contractor_name
     FROM jobs
     JOIN users ON users.id = jobs.contractor_id
-    WHERE jobs.status = 'open'
-  `).all() as any[];
+    WHERE jobs.status = 'open' AND jobs.skill IN (SELECT skill_name FROM worker_skills WHERE worker_id = ?)
+  `).all(workerId) as any[];
 
   const nearby = jobs
     .filter(job => job.location_lat != null)
@@ -182,7 +199,7 @@ app.get("/workers/nearby/:contractorId", (request, response) => {
   }
 
   const workers = db.prepare(`
-    SELECT id, name, skill, rating, location_lat, location_lng
+    SELECT id, name, skill, rating, phone, location_lat, location_lng
     FROM users
     WHERE role = 'worker'
   `).all() as any[];
@@ -198,6 +215,33 @@ app.get("/workers/nearby/:contractorId", (request, response) => {
     .slice(0, 20);
 
   return response.json(nearby);
+});
+
+app.get("/workers/:id/skills", (request, response) => {
+  const workerId = Number(request.params.id);
+  const skills = db.prepare("SELECT skill_name FROM worker_skills WHERE worker_id = ?").all(workerId) as { skill_name: string }[];
+  return response.json({ skills: skills.map(s => s.skill_name) });
+});
+
+app.post("/workers/add-skill", (request, response) => {
+  const { workerId, skill } = request.body as { workerId: number, skill: string };
+  if (!workerId || !skill) return response.status(400).json({ message: "Worker ID and Skill are required" });
+
+  const existing = db.prepare("SELECT * FROM worker_skills WHERE worker_id = ? AND skill_name = ?").get(workerId, skill);
+  if (existing) {
+    return response.status(400).json({ message: "Skill already added" });
+  }
+
+  db.prepare("INSERT INTO worker_skills (worker_id, skill_name) VALUES (?, ?)").run(workerId, skill);
+  return response.status(201).json({ message: "Skill successfully added" });
+});
+
+app.delete("/workers/remove-skill", (request, response) => {
+  const { workerId, skill } = request.body as { workerId: number, skill: string };
+  if (!workerId || !skill) return response.status(400).json({ message: "Worker ID and Skill are required" });
+
+  db.prepare("DELETE FROM worker_skills WHERE worker_id = ? AND skill_name = ?").run(workerId, skill);
+  return response.json({ message: "Skill successfully removed" });
 });
 
 app.post("/jobs/accept", (request, response) => {
@@ -533,6 +577,35 @@ app.get("/workers/:id/history", (request, response) => {
 
   return response.json({ history });
 });
+
+app.get("/workers/:id/rating", (request, response) => {
+  const workerId = Number(request.params.id);
+  const result = db.prepare(`
+    SELECT AVG(rating) as average_rating, COUNT(*) as total_ratings
+    FROM job_ratings
+    WHERE worker_id = ? AND rated_by = 'contractor'
+  `).get(workerId) as { average_rating: number | null, total_ratings: number } | undefined;
+
+  return response.json({
+    average_rating: result?.average_rating ?? null,
+    total_ratings: result?.total_ratings ?? 0
+  });
+});
+
+app.get("/contractors/:id/rating", (request, response) => {
+  const contractorId = Number(request.params.id);
+  const result = db.prepare(`
+    SELECT AVG(rating) as average_rating, COUNT(*) as total_ratings
+    FROM job_ratings
+    WHERE contractor_id = ? AND rated_by = 'worker'
+  `).get(contractorId) as { average_rating: number | null, total_ratings: number } | undefined;
+
+  return response.json({
+    average_rating: result?.average_rating ?? null,
+    total_ratings: result?.total_ratings ?? 0
+  });
+});
+
 app.post("/ai/parse-job-request", (request, response) => {
   const { message } = request.body as { message: string };
   if (!message) return response.status(400).json({ error: "No message" });

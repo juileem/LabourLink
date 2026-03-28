@@ -29,7 +29,7 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
     phone: "",
     company_name: "",
     location: "",
-    skill: skills[0]
+    skill: [skills[0]]
   });
 
   const panelTitle = useMemo(
@@ -182,11 +182,15 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
               {role === "worker" ? (
                 <>
                   <Select
-                    label="Primary Skill"
+                    label="Primary Skills"
+                    multiple
                     value={signupForm.skill}
-                    onChange={(event) =>
-                      setSignupForm((current) => ({ ...current, skill: event.target.value }))
-                    }
+                    onChange={(event) => {
+                      const options = Array.from(event.target.selectedOptions);
+                      const values = options.map((option) => option.value);
+                      setSignupForm((current) => ({ ...current, skill: values }));
+                    }}
+                    className="h-32"
                   >
                     {skills.map((skill) => (
                       <option key={skill} value={skill}>
@@ -194,6 +198,7 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
                       </option>
                     ))}
                   </Select>
+                  <p className="text-xs text-stone-500 mt-1 mb-3">Hold Cmd/Ctrl to select multiple.</p>
                   <DaySelector selectedDays={selectedDays} onToggle={toggleDay} />
                 </>
               ) : (
