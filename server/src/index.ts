@@ -4,6 +4,18 @@ import { db, initializeDatabase } from "./db.js";
 
 initializeDatabase();
 
+function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -30,14 +42,17 @@ app.post("/auth/signup", (request, response) => {
   }
 
   const rating = role === "worker" ? 4.7 : 4.4;
+  const location_lat = 19.0760;
+  const location_lng = 72.8777;
+
   const result = db
     .prepare(
       `
-        INSERT INTO users (name, phone, role, location, skill, preferred_days, company_name, rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (name, phone, role, location, location_lat, location_lng, skill, preferred_days, company_name, rating)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .run(name, phone, role, location, skill ?? null, preferred_days ?? "", company_name ?? null, rating);
+    .run(name, phone, role, location, location_lat, location_lng, skill ?? null, preferred_days ?? "", company_name ?? null, rating);
 
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
   return response.status(201).json({ user });
@@ -132,6 +147,59 @@ app.get("/jobs/available", (request, response) => {
   return response.json({ jobs });
 });
 
+app.get("/jobs/nearby/:workerId", (request, response) => {
+  const workerId = Number(request.params.workerId);
+  const worker = db.prepare("SELECT location_lat, location_lng FROM users WHERE id = ?").get(workerId) as any;
+  if (!worker || worker.location_lat == null) {
+    return response.json([]);
+  }
+
+  const jobs = db.prepare(`
+    SELECT jobs.*, users.name AS contractor_name
+    FROM jobs
+    JOIN users ON users.id = jobs.contractor_id
+    WHERE jobs.status = 'open'
+  `).all() as any[];
+
+  const nearby = jobs
+    .filter(job => job.location_lat != null)
+    .map(job => {
+      const distance = getDistance(worker.location_lat, worker.location_lng, job.location_lat, job.location_lng);
+      return { ...job, distance };
+    })
+    .filter(job => job.distance <= 20)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 20);
+
+  return response.json(nearby);
+});
+
+app.get("/workers/nearby/:contractorId", (request, response) => {
+  const contractorId = Number(request.params.contractorId);
+  const contractor = db.prepare("SELECT location_lat, location_lng FROM users WHERE id = ?").get(contractorId) as any;
+  if (!contractor || contractor.location_lat == null) {
+    return response.json([]);
+  }
+
+  const workers = db.prepare(`
+    SELECT id, name, skill, rating, location_lat, location_lng
+    FROM users
+    WHERE role = 'worker'
+  `).all() as any[];
+
+  const nearby = workers
+    .filter(w => w.location_lat != null)
+    .map(w => {
+      const distance = getDistance(contractor.location_lat, contractor.location_lng, w.location_lat, w.location_lng);
+      return { ...w, distance };
+    })
+    .filter(w => w.distance <= 20)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 20);
+
+  return response.json(nearby);
+});
+
 app.post("/jobs/accept", (request, response) => {
   const { jobId, workerId } = request.body as { jobId?: number; workerId?: number };
 
@@ -166,7 +234,6 @@ app.post("/jobs/accept", (request, response) => {
 });
 
 app.get("/contractor/jobs/:id/applications", (request, response) => {
-  // Wait, the API specifies contractor ID as parameter: "/contractor/jobs/:contractorId/applications"
   const contractorId = Number(request.params.id);
 
   const applications = db
@@ -178,7 +245,8 @@ app.get("/contractor/jobs/:id/applications", (request, response) => {
           users.name AS worker_name,
           users.skill AS skill,
           users.rating AS rating,
-          job_applications.status AS status
+          job_applications.status AS status,
+          EXISTS(SELECT 1 FROM job_ratings WHERE job_id = job_applications.job_id AND worker_id = job_applications.worker_id AND rated_by = 'contractor') AS is_rated
         FROM job_applications
         JOIN users ON users.id = job_applications.worker_id
         JOIN jobs ON jobs.id = job_applications.job_id
@@ -200,7 +268,8 @@ app.get("/worker/jobs/:id/accepted", (request, response) => {
         SELECT
           jobs.*,
           users.name AS contractor_name,
-          job_applications.status AS application_status
+          job_applications.status AS application_status,
+          EXISTS(SELECT 1 FROM job_ratings WHERE job_id = jobs.id AND worker_id = ? AND rated_by = 'worker') AS is_rated
         FROM jobs
         JOIN job_applications ON job_applications.job_id = jobs.id
         JOIN users ON users.id = jobs.contractor_id
@@ -208,7 +277,7 @@ app.get("/worker/jobs/:id/accepted", (request, response) => {
         ORDER BY job_applications.accepted_at DESC
       `
     )
-    .all(workerId);
+    .all(workerId, workerId);
 
   return response.json({ jobs });
 });
@@ -246,14 +315,17 @@ app.post("/jobs", (request, response) => {
     return response.status(404).json({ message: "Contractor not found" });
   }
 
+  const location_lat = 19.0760;
+  const location_lng = 72.8777;
+
   const result = db
     .prepare(
       `
-        INSERT INTO jobs (contractor_id, skill, location, date, time, salary, workers_needed, description)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (contractor_id, skill, location, location_lat, location_lng, date, time, salary, workers_needed, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .run(contractor_id, skill, location, date, time, salary, workers_needed, description ?? null);
+    .run(contractor_id, skill, location, location_lat, location_lng, date, time, salary, workers_needed, description ?? null);
 
   const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(result.lastInsertRowid);
   return response.status(201).json({ job });
@@ -301,7 +373,8 @@ app.get("/jobs/:id/applicants", (request, response) => {
           applications.*,
           users.name AS worker_name,
           users.skill AS worker_skill,
-          users.location AS worker_location
+          users.location AS worker_location,
+          users.rating AS worker_rating
         FROM applications
         JOIN users ON users.id = applications.worker_id
         WHERE applications.job_id = ?
@@ -460,6 +533,106 @@ app.get("/workers/:id/history", (request, response) => {
 
   return response.json({ history });
 });
+app.post("/ai/parse-job-request", (request, response) => {
+  const { message } = request.body as { message: string };
+  if (!message) return response.status(400).json({ error: "No message" });
+
+  const msg = message.toLowerCase();
+  
+  let skill_required = "labourer";
+  if (msg.includes("electrician")) skill_required = "Electrician";
+  else if (msg.includes("painter")) skill_required = "Painter";
+  else if (msg.includes("mason")) skill_required = "Mason";
+  else if (msg.includes("plumber")) skill_required = "Plumber";
+  else if (msg.includes("carpenter")) skill_required = "Carpenter";
+
+  const numMatch = msg.match(/\\d+/);
+  const workers_needed = numMatch ? parseInt(numMatch[0], 10) : 1;
+
+  let date = new Date().toISOString().split("T")[0];
+  if (msg.includes("tomorrow")) {
+    const tmrw = new Date();
+    tmrw.setDate(tmrw.getDate() + 1);
+    date = tmrw.toISOString().split("T")[0];
+  }
+
+  let location = "Mumbai";
+  if (msg.includes("bengaluru") || msg.includes("bangalore")) location = "Bengaluru";
+  else if (msg.includes("delhi")) location = "Delhi";
+  else if (msg.includes("mumbai")) location = "Mumbai";
+
+  return response.json({ skill_required, workers_needed, date, location });
+});
+
+app.post("/ai/suggest-workers", (request, response) => {
+  const { skill, location, contractorId } = request.body as { skill: string; location: string; contractorId?: number };
+
+  let contractorLat = 19.0760;
+  let contractorLng = 72.8777;
+
+  if (contractorId) {
+    const c = db.prepare("SELECT location_lat, location_lng FROM users WHERE id = ?").get(contractorId) as any;
+    if (c?.location_lat != null) {
+      contractorLat = c.location_lat;
+      contractorLng = c.location_lng;
+    }
+  }
+
+  const workers = db.prepare(`
+    SELECT id, name, phone, skill, rating, location_lat, location_lng
+    FROM users
+    WHERE role = 'worker' AND LOWER(skill) = LOWER(?)
+  `).all(skill) as any[];
+
+  const scoredWorkers = workers.map(w => {
+    let distance = 20;
+    if (w.location_lat != null) {
+      distance = getDistance(contractorLat, contractorLng, w.location_lat, w.location_lng);
+    }
+    
+    // Closer distance = higher score. Max 20km for score calculation.
+    let distanceScore = 0;
+    if (distance <= 20) {
+       distanceScore = ((20 - distance) / 20) * 100;
+    }
+
+    // Rating normalized to 100
+    const ratingScore = (w.rating / 5) * 100;
+
+    const score = (ratingScore * 0.7) + (distanceScore * 0.3);
+    return { ...w, match_score: Math.round(score) + "%", distance };
+  }).sort((a, b) => {
+    const scoreA = parseInt(a.match_score);
+    const scoreB = parseInt(b.match_score);
+    return scoreB - scoreA;
+  }).slice(0, 5);
+
+  return response.json(scoredWorkers);
+});
+
+app.post("/jobs/create-from-ai", (request, response) => {
+  const { contractor_id, skill_required, workers_needed, date, location, description } = request.body as any;
+
+  if (!contractor_id || !skill_required || !workers_needed || !date) {
+    return response.status(400).json({ error: "Missing required fields" });
+  }
+
+  const location_lat = 19.0760;
+  const location_lng = 72.8777;
+
+  const result = db
+    .prepare(
+      `
+        INSERT INTO jobs (contractor_id, skill, location, location_lat, location_lng, date, time, salary, workers_needed, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .run(contractor_id, skill_required, location || "Mumbai", location_lat, location_lng, date, "09:00", 1000, workers_needed, description || "Auto-created by AI Assistant");
+
+  const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(result.lastInsertRowid);
+  return response.status(201).json({ job });
+});
+
 const port = 4000;
 app.listen(port, () => {
   console.log(`LabourLink API listening on http://localhost:${port}`);

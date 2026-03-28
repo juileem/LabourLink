@@ -80,12 +80,17 @@ export function initializeDatabase() {
     // Ignore error if column already exists
   }
 
+  try { db.exec(`ALTER TABLE users ADD COLUMN location_lat REAL`); } catch (e) {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN location_lng REAL`); } catch (e) {}
+  try { db.exec(`ALTER TABLE jobs ADD COLUMN location_lat REAL`); } catch (e) {}
+  try { db.exec(`ALTER TABLE jobs ADD COLUMN location_lng REAL`); } catch (e) {}
+
 
   const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
   if (!userCount.count) {
     const insertUser = db.prepare(`
-      INSERT INTO users (name, phone, role, location, skill, preferred_days, company_name, rating)
-      VALUES (@name, @phone, @role, @location, @skill, @preferred_days, @company_name, @rating)
+      INSERT INTO users (name, phone, role, location, location_lat, location_lng, skill, preferred_days, company_name, rating)
+      VALUES (@name, @phone, @role, @location, @location_lat, @location_lng, @skill, @preferred_days, @company_name, @rating)
     `);
 
     insertUser.run({
@@ -93,6 +98,8 @@ export function initializeDatabase() {
       phone: "9000000001",
       role: "worker",
       location: "Bengaluru",
+      location_lat: 19.0760,
+      location_lng: 72.8777,
       skill: "Mason",
       preferred_days: "Mon, Tue, Wed, Thu, Fri",
       company_name: null,
@@ -104,6 +111,8 @@ export function initializeDatabase() {
       phone: "9000000002",
       role: "worker",
       location: "Bengaluru",
+      location_lat: 19.0780,
+      location_lng: 72.8810,
       skill: "Painter",
       preferred_days: "Mon, Wed, Fri, Sat",
       company_name: null,
@@ -111,10 +120,51 @@ export function initializeDatabase() {
     });
 
     insertUser.run({
+      name: "Amit Patel",
+      phone: "9123456780",
+      role: "worker",
+      location: "Mumbai",
+      location_lat: 19.0710,
+      location_lng: 72.8700,
+      skill: "Electrician",
+      preferred_days: "Mon, Tue, Wed",
+      company_name: null,
+      rating: 4.4
+    });
+
+    insertUser.run({
+      name: "Suresh Sharma",
+      phone: "9123456781",
+      role: "worker",
+      location: "Mumbai",
+      location_lat: 19.0850,
+      location_lng: 72.8850,
+      skill: "Electrician",
+      preferred_days: "Thu, Fri, Sat",
+      company_name: null,
+      rating: 4.1
+    });
+
+    insertUser.run({
+      name: "Vikram Singh",
+      phone: "9123456782",
+      role: "worker",
+      location: "Mumbai",
+      location_lat: 19.0900,
+      location_lng: 72.8600,
+      skill: "Painter",
+      preferred_days: "Mon, Wed, Fri",
+      company_name: null,
+      rating: 4.5
+    });
+
+    insertUser.run({
       name: "Mahesh BuildCo",
       phone: "9000000010",
       role: "contractor",
       location: "Bengaluru",
+      location_lat: 19.0760,
+      location_lng: 72.8777,
       skill: null,
       preferred_days: "",
       company_name: "BuildCo Infra",
@@ -125,11 +175,11 @@ export function initializeDatabase() {
   const jobCount = db.prepare("SELECT COUNT(*) as count FROM jobs").get() as { count: number };
   if (!jobCount.count) {
     db.prepare(`
-      INSERT INTO jobs (contractor_id, skill, location, date, time, salary, workers_needed, description)
+      INSERT INTO jobs (contractor_id, skill, location, location_lat, location_lng, date, time, salary, workers_needed, description)
       VALUES
-        (3, 'Mason', 'Whitefield, Bengaluru', '2025-03-29', '08:00', 950, 3, 'Residential wall and plaster finishing.'),
-        (3, 'Painter', 'Electronic City, Bengaluru', '2025-03-29', '09:30', 850, 2, 'Interior paint touch-up for office renovation.'),
-        (3, 'Electrician', 'HSR Layout, Bengaluru', '2025-03-30', '10:00', 1200, 1, 'Wiring support for a retail fit-out.')
+        (3, 'Mason', 'Whitefield, Bengaluru', 19.076, 72.877, '2025-03-29', '08:00', 950, 3, 'Residential wall and plaster finishing.'),
+        (3, 'Painter', 'Electronic City, Bengaluru', 19.078, 72.881, '2025-03-29', '09:30', 850, 2, 'Interior paint touch-up for office renovation.'),
+        (3, 'Electrician', 'HSR Layout, Bengaluru', 19.080, 72.870, '2025-03-30', '10:00', 1200, 1, 'Wiring support for a retail fit-out.')
     `).run();
   }
 }

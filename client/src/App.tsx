@@ -11,6 +11,8 @@ import { JobCard } from "./components/JobCard";
 import { Navbar } from "./components/Navbar";
 import { ProfileCard } from "./components/ProfileCard";
 import { RatingModal } from "./components/RatingModal";
+import { NearbyMap, type MarkerData } from "./components/NearbyMap";
+import { FloatingChatbot } from "./components/FloatingChatbot";
 
 function App() {
   const [user, setUser] = useState<User | null>(() => loadSession());
@@ -29,6 +31,31 @@ function App() {
     title: string;
     type: "worker" | "contractor";
   }>({ isOpen: false, jobId: 0, targetId: 0, title: "", type: "worker" });
+  const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
+
+  useEffect(() => {
+    const fetchNearby = async () => {
+      if (!user) return;
+      try {
+        const url = user.role === "worker" 
+          ? `http://localhost:4000/jobs/nearby/${user.id}`
+          : `http://localhost:4000/workers/nearby/${user.id}`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        const mapped = data.map((item: any) => ({
+          ...item,
+          type: user.role === "worker" ? "job" : "worker",
+          lat: item.location_lat,
+          lng: item.location_lng
+        }));
+        setMapMarkers(mapped);
+      } catch (e) {
+        console.error("Failed to load map data", e);
+      }
+    };
+    void fetchNearby();
+  }, [user]);
 
   const refreshJobs = async () => {
     setRefreshing(true);
@@ -235,15 +262,16 @@ function App() {
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
           <div className="space-y-6">
             <ProfileCard user={user} />
-            {user.role === "worker" ? (
-              <Card>
-                <p className="text-xs uppercase tracking-[0.24em] text-brand-300">Rating</p>
-                <h3 className="mt-2 text-2xl font-bold text-white">{user.rating.toFixed(1)} / 5</h3>
-                <p className="mt-2 text-sm text-stone-400">
-                  Based on recent contractor reviews and completed gigs.
-                </p>
-              </Card>
-            ) : (
+            <Card>
+              <p className="text-xs uppercase tracking-[0.24em] text-brand-300">Rating</p>
+              <h3 className="mt-2 text-2xl font-bold text-white">{user.rating.toFixed(1)} / 5</h3>
+              <p className="mt-2 text-sm text-stone-400">
+                {user.role === "worker"
+                  ? "Based on recent contractor reviews and completed gigs."
+                  : "Based on reviews from workers you've hired."}
+              </p>
+            </Card>
+            {user.role === "contractor" ? (
               <Card>
                 <div className="flex items-start gap-3">
                   <div className="rounded-2xl bg-brand-500/15 p-3 text-brand-300">
@@ -258,10 +286,21 @@ function App() {
                   </div>
                 </div>
               </Card>
-            )}
+            ) : null}
           </div>
 
           <div className="space-y-6">
+            <div className="bg-stone-900 shadow rounded-xl p-4 ring-1 ring-white/10">
+              <h2 className="text-xl font-bold text-white mb-2">
+                Nearby {user.role === "worker" ? "Jobs" : "Workers"}
+              </h2>
+              <NearbyMap 
+                centerLat={user.location_lat || 19.0760} 
+                centerLng={user.location_lng || 72.8777} 
+                markers={mapMarkers} 
+              />
+            </div>
+
             {user.role === "contractor" ? (
               <CreateJobForm contractorId={user.id} onCreate={handleCreateJob} loading={loading} />
             ) : null}
@@ -342,7 +381,7 @@ function App() {
                                       </div>
                                       <div className="flex items-center gap-3">
                                         <span className="text-stone-400">{worker.skill}</span>
-                                        {job.status === "completed" && (
+                                        {job.status === "completed" && !worker.is_rated && (
                                           <Button 
                                             variant="secondary" 
                                             className="px-2 py-1 text-xs"
@@ -371,7 +410,14 @@ function App() {
                                     className="flex flex-col gap-3 rounded-2xl bg-stone-950/70 p-4 ring-1 ring-white/10 sm:flex-row sm:items-center sm:justify-between"
                                   >
                                     <div>
-                                      <p className="font-semibold text-white">{applicant.worker_name}</p>
+                                      <p className="font-semibold text-white">
+                                        {applicant.worker_name}
+                                        {applicant.worker_rating != null && (
+                                          <span className="ml-2 inline-flex items-center rounded bg-yellow-400/10 px-1.5 py-0.5 text-xs font-medium text-yellow-500 ring-1 ring-inset ring-yellow-400/20">
+                                            ★ {Number(applicant.worker_rating).toFixed(1)}
+                                          </span>
+                                        )}
+                                      </p>
                                       <p className="text-sm text-stone-400">
                                         {applicant.worker_skill} • {applicant.worker_location}
                                       </p>
@@ -412,8 +458,8 @@ function App() {
                         <JobCard 
                           key={`accepted-${job.id}`} 
                           job={job} 
-                          actionLabel={job.status === "completed" ? "Rate Contractor" : undefined}
-                          onAction={job.status === "completed" ? () => setRatingModal({
+                          actionLabel={job.status === "completed" && !job.is_rated ? "Rate Contractor" : undefined}
+                          onAction={job.status === "completed" && !job.is_rated ? () => setRatingModal({
                             isOpen: true,
                             jobId: job.id,
                             targetId: job.contractor_id,
@@ -473,6 +519,9 @@ function App() {
         onSubmit={handleSubmitRating}
         onClose={() => setRatingModal({ ...ratingModal, isOpen: false })}
       />
+      {user.role === "contractor" && (
+        <FloatingChatbot contractor={user} onJobCreated={() => void refreshJobs()} />
+      )}
     </div>
   );
 }

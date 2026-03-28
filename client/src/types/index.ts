@@ -10,6 +10,8 @@ export interface User {
   preferred_days: string;
   rating: number;
   company_name?: string | null;
+  location_lat?: number;
+  location_lng?: number;
 }
 
 export interface Job {
@@ -18,6 +20,8 @@ export interface Job {
   contractor_name: string;
   skill: string;
   location: string;
+  location_lat?: number;
+  location_lng?: number;
   date: string;
   time: string;
   salary: number;
@@ -27,6 +31,7 @@ export interface Job {
   selected_count?: number;
   status?: "open" | "closed" | "completed";
   application_status?: string;
+  is_rated?: boolean | number;
 }
 
 export interface Application {
@@ -37,6 +42,9 @@ export interface Application {
   worker_name?: string;
   worker_skill?: string | null;
   worker_location?: string;
+  worker_rating?: number;
+  rating?: number;
+  is_rated?: boolean | number;
 }
 
 export interface JobHistory {

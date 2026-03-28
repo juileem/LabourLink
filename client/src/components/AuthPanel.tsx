@@ -102,7 +102,7 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
           <Card>
             <IdentificationIcon className="h-8 w-8 text-brand-300" />
             <p className="mt-4 text-lg font-semibold text-white">Simple onboarding</p>
-            <p className="mt-2 text-sm text-stone-400">Mock OTP keeps the demo flow quick.</p>
+            <p className="mt-2 text-sm text-stone-400">Password login keeps the demo flow quick.</p>
           </Card>
           <Card>
             <UserIcon className="h-8 w-8 text-brand-300" />
@@ -141,7 +141,7 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-brand-300">{mode}</p>
             <h2 className="mt-2 text-2xl font-bold text-white">{panelTitle}</h2>
-            <p className="mt-2 text-sm text-stone-400">Use OTP `1234` for all demo logins.</p>
+            <p className="mt-2 text-sm text-stone-400">Use password `1234` for all demo logins.</p>
           </div>
 
           {mode === "signup" ? (
@@ -223,13 +223,13 @@ export function AuthPanel({ onSignup, onLogin, loading }: AuthPanelProps) {
               />
               {!otpSent ? (
                 <Button block disabled={loading || !loginPhone} onClick={() => void handleSendOtp()}>
-                  {loading ? "Sending..." : "Send OTP"}
+                  {loading ? "Loading..." : "Enter Password"}
                 </Button>
               ) : (
                 <>
                   <Input
-                    label="Mock OTP"
-                    placeholder="Enter the OTP (or 1234)"
+                    label="Password"
+                    placeholder="Enter the password (or 1234)"
                     value={loginOtp}
                     onChange={(event) => setLoginOtp(event.target.value)}
                   />
