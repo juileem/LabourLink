@@ -25,4 +25,4 @@ Backend runs on `http://localhost:4000`
 - Mock OTP is `1234`
 - Login is phone-based only
 - Auth state is stored in `localStorage`
-- Ratings are seeded/mock values
+- Ratings are seeded/mock values.
