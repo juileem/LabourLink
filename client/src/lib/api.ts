@@ -41,6 +41,8 @@ export const api = {
     request<T>(`/jobs/${jobId}/select`, { method: "POST", body: JSON.stringify(payload) }),
   completeJob: <T>(jobId: number, payload: unknown) =>
     request<T>(`/jobs/${jobId}/complete`, { method: "PUT", body: JSON.stringify(payload) }),
+  submitPayment: <T>(payload: unknown) =>
+    request<T>("/payments", { method: "POST", body: JSON.stringify(payload) }),
   rateContractor: <T>(payload: unknown) =>
     request<T>("/ratings/contractor", { method: "POST", body: JSON.stringify(payload) }),
   rateWorker: <T>(payload: unknown) =>

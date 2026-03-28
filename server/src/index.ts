@@ -184,9 +184,9 @@ app.get("/jobs/nearby/:workerId", (request, response) => {
       const distance = getDistance(worker.location_lat, worker.location_lng, job.location_lat, job.location_lng);
       return { ...job, distance };
     })
-    .filter(job => job.distance <= 20)
+    .filter(job => job.distance <= 50)
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, 20);
+    .slice(0, 50);
 
   return response.json(nearby);
 });
@@ -210,9 +210,9 @@ app.get("/workers/nearby/:contractorId", (request, response) => {
       const distance = getDistance(contractor.location_lat, contractor.location_lng, w.location_lat, w.location_lng);
       return { ...w, distance };
     })
-    .filter(w => w.distance <= 20)
+    .filter(w => w.distance <= 50)
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, 20);
+    .slice(0, 50);
 
   return response.json(nearby);
 });
@@ -494,6 +494,29 @@ app.put("/jobs/:id/complete", (request, response) => {
   return response.json({ message: "Job marked as completed" });
 });
 
+app.post("/payments", (request, response) => {
+  const { jobId, contractorId, workerId, amount, paymentMethod, paymentStatus } = request.body as {
+    jobId: number;
+    contractorId: number;
+    workerId: number;
+    amount: number;
+    paymentMethod: string;
+    paymentStatus: string;
+  };
+
+  if (!jobId || !contractorId || !workerId || !amount || !paymentMethod || !paymentStatus) {
+    return response.status(400).json({ message: "Missing required payment fields" });
+  }
+
+  // Insert payment record
+  db.prepare(`
+    INSERT INTO payments (job_id, contractor_id, worker_id, amount, payment_method, payment_status)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(jobId, contractorId, workerId, amount, paymentMethod, paymentStatus);
+
+  return response.json({ message: "Payment recorded successfully", success: true });
+});
+
 app.post("/ratings/contractor", (request, response) => {
   const { jobId, workerId, contractorId, rating, review } = request.body as {
     jobId: number;
@@ -566,14 +589,17 @@ app.get("/workers/:id/history", (request, response) => {
       users.name AS contractor_name,
       jobs.date AS date,
       job_ratings.rating AS rating,
-      job_ratings.review AS review
+      job_ratings.review AS review,
+      payments.amount AS payment_amount,
+      payments.payment_status AS payment_status
     FROM jobs
     JOIN job_applications ON job_applications.job_id = jobs.id
     JOIN users ON users.id = jobs.contractor_id
     LEFT JOIN job_ratings ON job_ratings.job_id = jobs.id AND job_ratings.worker_id = ? AND job_ratings.rated_by = 'contractor'
+    LEFT JOIN payments ON payments.job_id = jobs.id AND payments.worker_id = ? AND payments.payment_status = 'success'
     WHERE job_applications.worker_id = ? AND jobs.status = 'completed' AND job_applications.status = 'accepted'
     ORDER BY jobs.date DESC
-  `).all(workerId, workerId);
+  `).all(workerId, workerId, workerId);
 
   return response.json({ history });
 });
@@ -604,6 +630,25 @@ app.get("/contractors/:id/rating", (request, response) => {
     average_rating: result?.average_rating ?? null,
     total_ratings: result?.total_ratings ?? 0
   });
+});
+
+app.get("/workers/:id/badges", (request, response) => {
+  const workerId = Number(request.params.id);
+
+  // Safely aggregates count of all perfectly completed jobs natively grouped by skill
+  const counts = db.prepare(`
+    SELECT
+      jobs.skill,
+      COUNT(jobs.id) AS completed_count
+    FROM jobs
+    JOIN job_applications ON job_applications.job_id = jobs.id
+    WHERE job_applications.worker_id = ? 
+      AND jobs.status = 'completed' 
+      AND job_applications.status = 'accepted'
+    GROUP BY jobs.skill
+  `).all(workerId) as { skill: string; completed_count: number }[];
+
+  return response.json({ badges: counts });
 });
 
 app.post("/ai/parse-job-request", (request, response) => {
@@ -654,7 +699,8 @@ app.post("/ai/suggest-workers", (request, response) => {
   const workers = db.prepare(`
     SELECT id, name, phone, skill, rating, location_lat, location_lng
     FROM users
-    WHERE role = 'worker' AND LOWER(skill) = LOWER(?)
+    WHERE role = 'worker' 
+      AND id IN (SELECT worker_id FROM worker_skills WHERE LOWER(skill_name) = LOWER(?))
   `).all(skill) as any[];
 
   const scoredWorkers = workers.map(w => {

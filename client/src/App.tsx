@@ -13,6 +13,8 @@ import { ProfileCard } from "./components/ProfileCard";
 import { RatingModal } from "./components/RatingModal";
 import { NearbyMap, type MarkerData } from "./components/NearbyMap";
 import { FloatingChatbot } from "./components/FloatingChatbot";
+import { WorkerBadges } from "./components/WorkerBadges";
+import { PaymentModal, type PaymentPayload } from "./components/PaymentModal";
 
 function App() {
   const [user, setUser] = useState<User | null>(() => loadSession());
@@ -31,6 +33,22 @@ function App() {
     title: string;
     type: "worker" | "contractor";
   }>({ isOpen: false, jobId: 0, targetId: 0, title: "", type: "worker" });
+  
+  const [paymentModal, setPaymentModal] = useState<{
+    isOpen: boolean;
+    jobId: number;
+    workerId: number;
+    workerName: string;
+    jobTitle: string;
+    amount: number;
+  }>({ isOpen: false, jobId: 0, workerId: 0, workerName: "", jobTitle: "", amount: 0 });
+
+  const [transactionSuccess, setTransactionSuccess] = useState<{
+    isOpen: boolean;
+    workerName: string;
+    amount: number;
+  }>({ isOpen: false, workerName: "", amount: 0 });
+
   const [mapMarkers, setMapMarkers] = useState<MarkerData[]>([]);
 
   useEffect(() => {
@@ -175,12 +193,23 @@ function App() {
     }
   };
 
-  const handleCompleteJob = async (jobId: number) => {
+  const handleCompleteJob = async (jobId: number, autoPayWorker?: { workerId: number; workerName: string; skill: string; salary: number }) => {
     if (!user) return;
     setLoading(true);
     try {
       await api.completeJob(jobId, { contractorId: user.id });
       await refreshJobs();
+      
+      if (autoPayWorker) {
+        setPaymentModal({
+          isOpen: true,
+          jobId,
+          workerId: autoPayWorker.workerId,
+          workerName: autoPayWorker.workerName,
+          jobTitle: autoPayWorker.skill,
+          amount: autoPayWorker.salary
+        });
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not complete job");
     } finally {
@@ -198,6 +227,11 @@ function App() {
         rating: payload.rating,
         review: payload.review
       });
+      // Assuming rating triggers post-payment or post-completion seamlessly.
+      // If we just came from a payment cycle automatically, show the final transaction screen!
+      if (paymentModal.workerId === ratingModal.targetId) {
+        setTransactionSuccess({ isOpen: true, workerName: paymentModal.workerName, amount: paymentModal.amount });
+      }
     } else {
       await api.rateContractor({
         jobId: ratingModal.jobId,
@@ -208,6 +242,10 @@ function App() {
       });
     }
     await refreshJobs();
+  };
+
+  const handlePaymentSubmit = async (payload: PaymentPayload) => {
+    await api.submitPayment(payload);
   };
 
   if (!user) {
@@ -224,7 +262,7 @@ function App() {
     );
   }
 
-  const workerSuggestedJobs = jobs.filter((job) => job.skill === user.skill);
+  const workerSuggestedJobs = jobs; // Filtered securely by backend API getAvailableJobs now natively!
   const contractorJobs = jobs.filter((job) => job.contractor_id === user.id);
 
   return (
@@ -262,15 +300,8 @@ function App() {
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
           <div className="space-y-6">
             <ProfileCard user={user} refreshTrigger={refreshing} />
-            <Card>
-              <p className="text-xs uppercase tracking-[0.24em] text-brand-300">Rating</p>
-              <h3 className="mt-2 text-2xl font-bold text-white">{user.rating.toFixed(1)} / 5</h3>
-              <p className="mt-2 text-sm text-stone-400">
-                {user.role === "worker"
-                  ? "Based on recent contractor reviews and completed gigs."
-                  : "Based on reviews from workers you've hired."}
-              </p>
-            </Card>
+            {user.role === "worker" && <WorkerBadges workerId={user.id} />}
+            {/* The standalone Rating card has been removed as requested. Avg Rating lives in ProfileCard. */}
             {user.role === "contractor" ? (
               <Card>
                 <div className="flex items-start gap-3">
@@ -319,7 +350,9 @@ function App() {
                 {(user.role === "worker" ? workerSuggestedJobs : contractorJobs).map((job) => {
                   const applicants = jobApplicants[job.id] ?? [];
                   const selectedApplicants = applicants.filter((applicant) => applicant.status === "selected");
-                  const alreadyApplied = applicants.some((application) => application.worker_id === user.id);
+                  const alreadyApplied = user.role === "worker" 
+                    ? acceptedWorkerJobs.some((accepted) => accepted.id === job.id)
+                    : applicants.some((application) => application.worker_id === user.id);
 
                   return (
                     <JobCard
@@ -329,7 +362,19 @@ function App() {
                         status: selectedApplicants.length >= job.workers_needed ? "closed" : "open"
                       }}
                       actionLabel={user.role === "worker" ? (alreadyApplied ? "Applied" : "Accept Job") : (job.status === "open" ? "Mark as Completed" : undefined)}
-                      onAction={user.role === "worker" ? () => void handleApply(job.id) : (job.status === "open" ? () => void handleCompleteJob(job.id) : undefined)}
+                      onAction={user.role === "worker" ? () => void handleApply(job.id) : (job.status === "open" ? () => {
+                        const targetWorker = contractorAcceptedWorkers[job.id]?.[0] || selectedApplicants[0];
+                        if (targetWorker) {
+                          void handleCompleteJob(job.id, {
+                            workerId: targetWorker.worker_id,
+                            workerName: targetWorker.worker_name || targetWorker.name,
+                            skill: job.skill,
+                            salary: job.salary
+                          });
+                        } else {
+                          void handleCompleteJob(job.id);
+                        }
+                      } : undefined)}
                       disabled={loading || alreadyApplied}
                       footer={
                         user.role === "contractor" ? (
@@ -458,7 +503,12 @@ function App() {
                         <JobCard 
                           key={`accepted-${job.id}`} 
                           job={job} 
-                          actionLabel={job.status === "completed" && !job.is_rated ? "Rate Contractor" : undefined}
+                          actionLabel={
+                            job.status === "completed" && !job.is_rated 
+                              ? "Rate Contractor" 
+                              : (job.status === "open" || job.status === "closed" ? "Accepted" : undefined)
+                          }
+                          disabled={job.status !== "completed"}
                           onAction={job.status === "completed" && !job.is_rated ? () => setRatingModal({
                             isOpen: true,
                             jobId: job.id,
@@ -487,6 +537,11 @@ function App() {
                               <h3 className="font-bold text-lg text-white">{historyItem.skill} Job</h3>
                               <p className="text-sm text-stone-400 mt-1">Contractor: {historyItem.contractor_name}</p>
                               <p className="text-sm text-stone-400">Completed: {historyItem.date}</p>
+                              {historyItem.payment_status === "success" && historyItem.payment_amount && (
+                                <div className="mt-2 inline-flex items-center rounded bg-emerald-500/10 px-2 py-1 text-sm font-bold text-emerald-400 ring-1 ring-inset ring-emerald-500/20 shadow-inner">
+                                  Payment Received 💰 ₹{historyItem.payment_amount}
+                                </div>
+                              )}
                             </div>
                             {historyItem.rating ? (
                               <div className="text-right">
@@ -519,6 +574,51 @@ function App() {
         onSubmit={handleSubmitRating}
         onClose={() => setRatingModal({ ...ratingModal, isOpen: false })}
       />
+      <PaymentModal
+        isOpen={paymentModal.isOpen}
+        onClose={() => setPaymentModal({ ...paymentModal, isOpen: false })}
+        onSuccess={() => {
+          // Launch the rating screen sequentially explicitly after close timeout!
+          setRatingModal({
+            isOpen: true,
+            jobId: paymentModal.jobId,
+            targetId: paymentModal.workerId,
+            title: `Rate ${paymentModal.workerName}`,
+            type: "worker"
+          });
+        }}
+        onSubmit={handlePaymentSubmit}
+        jobId={paymentModal.jobId}
+        contractorId={user.id}
+        workerId={paymentModal.workerId}
+        workerName={paymentModal.workerName}
+        jobTitle={paymentModal.jobTitle}
+        amount={paymentModal.amount}
+      />
+
+      {/* Transaction Success Final State Message */}
+      {transactionSuccess.isOpen && (
+        <div className="fixed z-[60] inset-0 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-sm relative text-center border border-emerald-500/30">
+            <h2 className="text-2xl font-bold text-emerald-400 mb-4">Transaction Completed ✔</h2>
+            <div className="text-left bg-stone-900/50 p-4 rounded-xl ring-1 ring-white/10 mb-6 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-400">Payment</span>
+                <span className="font-semibold text-emerald-400">₹{transactionSuccess.amount}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-stone-400">Worker</span>
+                <span className="font-semibold text-stone-200">{transactionSuccess.workerName}</span>
+              </div>
+            </div>
+            <p className="text-sm text-stone-400 mb-6">Thank you for using LabourLink.</p>
+            <Button className="w-full" onClick={() => setTransactionSuccess({ ...transactionSuccess, isOpen: false })}>
+              Done
+            </Button>
+          </Card>
+        </div>
+      )}
+
       {user.role === "contractor" && (
         <FloatingChatbot contractor={user} onJobCreated={() => void refreshJobs()} />
       )}

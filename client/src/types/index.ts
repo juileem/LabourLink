@@ -52,6 +52,8 @@ export interface JobHistory {
   skill: string;
   contractor_name: string;
   date: string;
-  rating: number;
-  review: string;
+  rating?: number;
+  review?: string;
+  payment_amount?: number;
+  payment_status?: string;
 }
